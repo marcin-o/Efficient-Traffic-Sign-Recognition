@@ -34,9 +34,12 @@ class BaseCNN(nn.Module):
         return self.classifier(self.features(x))
 
 
-def build_resnet(num_classes=43, pretrained=True):
+def build_resnet(num_classes=43, pretrained=True, small_input=True):
     weights = models.ResNet18_Weights.DEFAULT if pretrained else None
     net = models.resnet18(weights=weights)
+    if small_input:
+        net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        net.maxpool = nn.Identity()
     net.fc = nn.Linear(net.fc.in_features, num_classes)
     return net
 

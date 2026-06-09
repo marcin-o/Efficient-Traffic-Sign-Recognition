@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
@@ -11,7 +10,6 @@ def get_transforms(train=True, size=32):
     if train:
         return transforms.Compose([
             transforms.Resize((size, size)),
-            transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2),
             transforms.RandomRotation(15),
             transforms.ToTensor(),
@@ -37,15 +35,27 @@ def get_loaders(data_root, batch_size=64, num_workers=4, size=32):
     return train_loader, test_loader
 
 
+def _denormalize(imgs):
+    mean = torch.tensor(MEAN, device=imgs.device).view(1, 3, 1, 1)
+    std = torch.tensor(STD, device=imgs.device).view(1, 3, 1, 1)
+    return imgs * std + mean
+
+
+def _normalize(imgs):
+    mean = torch.tensor(MEAN, device=imgs.device).view(1, 3, 1, 1)
+    std = torch.tensor(STD, device=imgs.device).view(1, 3, 1, 1)
+    return (imgs - mean) / std
+
+
 def apply_corruption(imgs, corruption="gaussian_noise", severity=0.1):
-    noisy = imgs.clone()
+    px = _denormalize(imgs).clamp(0, 1)
     if corruption == "gaussian_noise":
-        noisy += torch.randn_like(noisy) * severity
+        px = px + torch.randn_like(px) * severity
     elif corruption == "blur":
         import torchvision.transforms.functional as F
-        k = 3
-        noisy = torch.stack([F.gaussian_blur(img, kernel_size=k) for img in noisy])
+        px = F.gaussian_blur(px, kernel_size=3)
     elif corruption == "brightness":
-        noisy = torch.clamp(noisy * (1 + severity), 0, 1)
-    return noisy
+        px = px * (1 + severity)
+    px = px.clamp(0, 1)
+    return _normalize(px)
 

@@ -1,6 +1,6 @@
 import argparse
 import json
-import os
+import random
 
 import torch
 import torch.nn as nn
@@ -65,6 +65,12 @@ def run_training(model, train_loader, test_loader, device, epochs, lr, use_amp, 
     return model
 
 
+def set_seed(seed=42):
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
 def prune_model(model, amount=0.3):
     import torch.nn.utils.prune as prune
     for name, module in model.named_modules():
@@ -85,8 +91,10 @@ def main():
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--prune-amount", type=float, default=0.3)
     parser.add_argument("--output", default="results.json")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
+    set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_amp = not args.no_amp
 
@@ -106,17 +114,26 @@ def main():
     print("\nBaseCNN evaluation:")
     results["cnn"] = full_report(cnn, test_loader, device, model_size_mb, count_parameters)
 
-    print("\n=== Training ResNet18 ===")
-    resnet = build_resnet(pretrained=True).to(device)
+    print("\n=== Training ResNet18 (naive 224-style stem) ===")
+    resnet_naive = build_resnet(pretrained=True, small_input=False).to(device)
+    resnet_naive = run_training(resnet_naive, train_loader, test_loader, device,
+                                args.epochs_resnet, args.lr * 0.1, use_amp, "ResNet18-naive")
+    torch.save(resnet_naive.state_dict(), "resnet18_naive.pt")
+    print("\nResNet18 (naive) evaluation:")
+    results["resnet18_naive"] = full_report(resnet_naive, test_loader, device,
+                                            model_size_mb, count_parameters)
+
+    print("\n=== Training ResNet18 (adapted for 32x32) ===")
+    resnet = build_resnet(pretrained=True, small_input=True).to(device)
     resnet = run_training(resnet, train_loader, test_loader, device,
                           args.epochs_resnet, args.lr * 0.1, use_amp, "ResNet18")
     torch.save(resnet.state_dict(), "resnet18.pt")
-    print("\nResNet18 evaluation:")
+    print("\nResNet18 (adapted) evaluation:")
     results["resnet18"] = full_report(resnet, test_loader, device, model_size_mb, count_parameters)
 
     print("\n=== Mixed Precision inference benchmark (ResNet18) ===")
     if device.type == "cuda":
-        resnet_fp16 = build_resnet(pretrained=False).to(device).half()
+        resnet_fp16 = build_resnet(pretrained=False, small_input=True).to(device).half()
         resnet_fp16.load_state_dict({k: v.half() for k, v in resnet.state_dict().items()})
         from eval_utils import measure_latency
         lat_fp32 = measure_latency(resnet, device)

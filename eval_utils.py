@@ -1,6 +1,5 @@
 import time
 import torch
-import numpy as np
 
 
 def accuracy(model, loader, device):
@@ -17,7 +16,8 @@ def accuracy(model, loader, device):
 
 def measure_latency(model, device, input_size=(1, 3, 32, 32), warmup=50, runs=200):
     model.eval()
-    dummy = torch.randn(*input_size, device=device)
+    dtype = next(model.parameters()).dtype
+    dummy = torch.randn(*input_size, device=device, dtype=dtype)
 
     if device.type == "cuda":
         for _ in range(warmup):
@@ -44,12 +44,16 @@ def measure_latency(model, device, input_size=(1, 3, 32, 32), warmup=50, runs=20
 def measure_throughput(model, loader, device):
     model.eval()
     total = 0
+    if device.type == "cuda":
+        torch.cuda.synchronize()
     t0 = time.perf_counter()
     with torch.no_grad():
         for x, _ in loader:
             x = x.to(device)
             model(x)
             total += x.size(0)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
     elapsed = time.perf_counter() - t0
     return total / elapsed
 
